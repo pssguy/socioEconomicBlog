@@ -1,0 +1,423 @@
+---
+title: "mytinyshinys - Socio-Economics"
+author: "mytinyshinys"
+date: "March 4, 2016"
+output:
+  html_document:
+    fig_caption: yes
+    theme: flatly
+    toc: true
+    toc_float: true
+    toc_depth: 2
+    code_folding: hide
+css: customBlog.css
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE)
+```
+
+```{r libraries,  echo=TRUE, include= FALSE}
+# # libraries required
+library(shiny)
+
+#library(shinydashboard)
+
+library(dplyr)
+
+# more for collecting initial data?
+library(rsdmx)
+library(readr)
+library(plotly)
+#library(crosstalk)
+library(countrycode)
+library(tidyr)
+library(DT)
+library(markdown)
+
+
+```
+This is a series of short articles usually related to apps I develop for the [mytinyshinys site](https://mytinyshinys.shinyapps.io/dashboard/) relating to socio/economic issues.     
+Commented out code can be shown or hidden by toggling buttons
+
+
+##  <span class="post">UK Library Borrowings</span>
+*9th March 2016*
+
+Many websites provide text or tables solely in pdf format. This makes it difficult to access the underlying data
+and may be due to ignorance, lack of time/desire to help out developers or intended to make scraping more difficult    
+
+However, there has been some progress on this front, and I am using the [pdftools package](https://github.com/ropensci/pdftools) recently released by Jeroen Ooms under the [rOpenSci](http://ropensci.org/) banner. He has recently written a [blog post](http://ropensci.org/blog/2016/03/01/pdftools-and-jeroen?utm_source=rOpenSci+Blog&utm_campaign=3a49573252-RSS_EMAIL_CAMPAIGN&utm_medium=email&utm_term=0_d78520d99e-3a49573252-147346145) about it
+
+One of these pesky websites is that of the UK Public Lending Right, [PLR](https://www.plr.uk.com/allAboutPlr/whatIsPlr.htm) whose main function is to ensure that authors get some income from their books being loaned
+
+They have a set of pdf pages which list the most popular authors in each year going back to 1990
+
+```{r 160309 libraries,  echo=TRUE, include= FALSE}
+
+## currently this cannot be loaded on shinyapps.io
+#library(pdftools)
+
+```
+
+Click on the code button, if you wish to see the way I have downloaded and tried to make sense of the data. I have set eval=FALSE so the code does not run
+
+```{r 160309 download and pre-process,  echo=TRUE, eval= FALSE}
+
+# download the latest set of pdf pages and save to a temp file
+download.file("https://www.plr.uk.com/mediaCentre/mostBorrowedAuthors/top250Authors/2014-2015Top500Authors.pdf", "authors.pdf", mode = "wb")
+
+# extract the text
+authorsText <- pdf_text("authors.pdf")
+
+# This results in a character vector - each value the text for the whole page e.g
+
+authorsText[1]
+# [1] "  MOST BORROWED AUTHORS\r\n  JULY 2014 - JUNE 2015\r\n  (Adult & Children Combined)\r\n                                 Adult/\r\n          Name                   Child\r\n     1.   James Patterson        A\r\n     2.   Julia Donaldson        C\r\n     3.   Daisy Meadows          C\r\n     
+
+# Not very pretty, but manageable making use of the stringr package
+# No doubt there are better ways - but this is still pretty fast
+
+
+for (j in 1:length(authorsText)) {
+
+ a <-str_split(authorsText[j],"\r\n")  
+ b <-unlist(a) 
+ if(j!=1) {
+ b <- b[3:53] ## early lines do not include author information
+ } else {
+ b <- b[6:45]  ## and the first page also includes headers
+ }
+ 
+# set empty vectors
+author <- character()
+category <- character() # Adult, Child or both
+
+
+ 
+ for(i in 1:length(b)) {
+ 
+   a <-b[i] %>% 
+     str_replace_all("[0-9]","") %>% 
+     str_replace_all("[.]","") %>% 
+     str_trim()
+   
+   l <-nchar(a)
+   
+  # example value
+    # "     1.   James Patterson        A"
+   
+   author[i] <- a %>%
+     str_sub(1,l-4) %>%
+      str_trim()
+
+   category[i] <- a %>%
+     str_sub(l-3,l) %>%
+     str_trim()
+  
+ }
+
+tempdf <- data.frame(author,category,stringsAsFactors=F)
+
+if (j!=1) {
+  df <- rbind(df,tempdf)
+} else {
+  df <- tempdf
+}
+
+}
+
+df <- df[1:502,]  ## still a few issues df$category
+df <- df[df$category!="",]
+df <- df[!is.na(df$category),]
+df2014 <- df
+df2014$year <- 2014
+
+
+## rinse and repeat for all years - with modifications in code as required
+## and combine. Earlier years only listed around 100 authors
+
+borrowings <-bind_rows(df1990,.....,df2014)
+
+# save all data
+# Though it did require re-opening with some final minor corrections to data
+write_csv(borrowings,"data/borrowings.csv")
+
+```
+
+The result is a pretty unexciting data.frame with three columns, author, category and year
+Let's have a look at some of the consistently popular authers over the past quarter-century
+
+```{r 160309 process ,  echo=TRUE}
+
+## read back in the data.frame
+
+borrowings <- read_csv("data/borrowings.csv")
+
+# lets calculate the rank for every year
+borrowings <- borrowings %>% 
+  filter(!is.na(author)) %>% # still some issues that would need to be sorted if important issue
+  group_by(year) %>% 
+  mutate(rank=row_number())
+  
+# print(glimpse(borrowings))
+   
+  # always in top 100
+always <-borrowings %>% 
+  filter(rank<=100) %>% 
+  group_by(author) %>% 
+  tally() %>% 
+  ungroup() %>% 
+  arrange(desc(n)) %>% 
+  filter(n==25)
+
+#print(nrow(always)) # Just 7
+
+# restrict the borrowings data to these authors
+topAuthors <- always$author
+
+
+```
+
+Turns out there are only seven so  we can easily do an uncluttered plot
+
+```{r 160309  chart,  echo=TRUE}
+# plot their popularity over the years
+borrowings %>% 
+  filter(author %in% topAuthors) %>% 
+  arrange(year) %>% 
+  plot_ly(x=year,y=rank,markers="lines", color=author) %>% 
+  layout(hovermode = "closest",
+         title="Authors who have been in top 100 most borrowed from UK Libraries in each of past 25 years",
+         titlefont=list(size=14),
+         xaxis=list(title=""),
+         yaxis=list(title="Rank",autorange="reversed")
+         )
+  
+  
+
+```
+
+Of the original top 10, children's author, Enid Blyton - who has been dead almost 50 years -
+currently occupies the highest position
+
+##  <span class="post">OECD - migration</span>
+*8th March 2016*
+
+
+The Organisation for Economic Co-operation and Development (OECD) was founded in 1961 to stimulate economic progress and world trade. It consists of 34 of the richest countries in the World
+
+The [OECD stats site](http://stats.oecd.org/#) has a wide range of tables with many different themes and I thought it would be a useful companion to the interactive ability provided by the [plotly](https://plot.ly/r/getting-started/) range of charts. The RopenSci guys have created the plotly R package to ease things along
+
+
+One major item of contention at the moment is the level of immigration (whether refugee or work-driven) and the OECD has 11 tables relating to Migration detailing inflow and outflow by country by year. It should be noted that there is a lot of missing data - particularly pre 21st century
+
+I used Eric Persson's OECD package to download the data but this takes a long time so saved the data in an rds file for subsequent access
+
+
+
+```{r 160308 data loading, echo=TRUE}
+
+# read in some pre-processed data
+countries <- countrycode_data
+countryPops <- read_csv("data/countryPops.csv")
+migration_df <- readRDS("data/totalMIG.rds") 
+migration_cats <- read_csv("data/categoriesMIG.csv")
+
+# create input values for shiny 
+migCats <- migration_cats$id[1]
+names(migCats) <- migration_cats$label[1]
+
+minYear <- as.integer(min(migration_df$obsTime))
+maxYear <- as.integer(max(migration_df$obsTime))
+
+## lists for map construction
+
+# country border - available but not used as default is ok
+l <- list(color = toRGB("grey"), width = 2)
+
+# Use Robinson map projection which distorts at poles which is irrelevant for this purpose
+g <- list(
+  scope = 'world',
+  projection = list(type = 'robinson'),
+  showlakes = FALSE
+)
+
+```
+
+We can now create the input dialogues. Currently only one table option is on offer but there is a range of years available
+
+```{r  160308 input, echo=TRUE}
+
+    inputPanel(
+      selectInput("mig_Category", label="Select Category (1)",migCats),
+      sliderInput("mig_years", label="Select Year(s)", min=minYear,max=maxYear,
+      value=maxYear, step=1,sep="")
+      )
+
+```
+
+With year and table selected, a map and table of immigration flow in by country can be produced
+
+```{r  160308 inflow, echo=TRUE}
+
+data <- reactive({
+  
+ # Create a couple of data.frames for use in tables/maps
+  req(input$mig_Category)
+  req(input$mig_years)
+  
+ 
+  
+  sel_data <-migration_df %>% 
+    select(-TIME_FORMAT, -OBS_STATUS) %>%  # remove unnecessary columns
+    filter(VAR==input$mig_Category) %>% # reduce to variable of interest
+    spread(GEN,obsValue) %>%  # obtain male data
+    mutate(MEN=ifelse(is.na(WMN),TOT,TOT-WMN)) %>% # some women data is NA
+    gather(key=GEN,value=obsValue,TOT,MEN,WMN) %>% 
+    mutate(Year=as.integer(obsTime)) %>%  # further tidying up
+    select(Year,From=CO2,Gender=GEN,To=COU,Count=obsValue) %>%  # link to pops
+    left_join(countryPops,by=c("From"="countryId","Year"="year")) %>% 
+   rename(Population=count)
+  
+
+  
+  
+  byYear <-sel_data %>%
+    filter(Gender=="TOT"&Year==input$mig_years&From!="TOT") %>% ## avoid double counting
+    group_by(To) %>%
+    summarize(Total=sum(Count,na.rm=T)) %>%
+    left_join(countries,by=c("To"="iso3c")) %>% 
+    select(To,Total,country.name) 
+
+  
+  
+  info=list(df=byYear,sel_data=sel_data)
+  return(info)
+  
+})
+
+DT::renderDataTable({
+  
+  data()$df %>% 
+    mutate(Year=input$mig_years) %>% 
+    left_join(countryPops,by=c("To"="countryId","Year"="year")) %>% 
+    arrange(desc(Total)) %>% 
+    select(Country,Immigrants=Total,Population=count) %>% 
+    #  select(Country=country.name,Immigrants=Total) %>% 
+    mutate(OECD_pc=round(Immigrants*100/sum(Immigrants,na.rm=T),1),Country_pc=round(Immigrants*100/Population,1)) %>% 
+    arrange(desc(Immigrants)) %>%
+    DT::datatable(class='compact stripe hover row-border order-column',rownames=FALSE,options= list(paging = TRUE, searching = FALSE,info=FALSE)) %>% 
+    formatCurrency(c('Immigrants','Population'), digits=0,currency="")
+  
+
+})
+
+
+renderPlotly({
+
+  theTitle <- paste0('Total Immigrants into OECD Countries ',input$mig_years)
+
+  plot_ly(data()$df, z = log10(Total),  locations = To, hoverinfo = "text",
+          text = paste(country.name,"<br>",Total),
+          type = 'choropleth',  showscale=FALSE,
+          color = Total, colors = 'BuGn', showlegend = FALSE, source="mapTo",
+          colorbar = list(title = "Immigrants")) %>%
+    layout(title = theTitle, geo = g)
+
+})
+
+
+```
+<!-- Unfortunately, at the time of writing plotly only renders maps in a browser. Here is what the latest (2013) data looks like -->
+
+<!-- ![](images/immigrants2013.png) -->
+
+The really cool thing is that any of the countries on the map can be clicked to give a corresponding table and map of where the immigrants have come from.     
+There may be issues producing output for earlier years
+
+```{r  160308 outflow, echo=TRUE}
+
+# pickup the clicked country
+mapData <- reactive({
+
+  s <- event_data("plotly_click", source="mapTo")
+  point <-  s[["pointNumber"]] # as initial index is 0
+  
+})
+
+## Code for map and table. Commented out to avoid whitespace
+
+ renderPlotly({
+  
+   if (is.null(mapData())) return()
+  
+    #simplify code
+   df <-data()$df
+   sel_data <- data()$sel_data
+   
+    #get selected country information
+   inCountry <-df$To[[mapData()+1]]
+   countryName <- df$country.name[[mapData()+1]]
+   
+   
+   mapdf <- sel_data %>% 
+     filter(Gender=="TOT"&Year==input$mig_years&To==inCountry&From!="TOT") 
+  
+   
+   theTitle = paste0("Immigrants by Country into ",countryName, " ",input$mig_years)
+   
+   plot_ly(mapdf, z = log10(Count),  locations = From,hoverinfo = "text",
+           text = paste(Country,"<br>",Count), type = 'choropleth',showscale= FALSE,
+           color = Count, colors = 'YlOrRd', colorbar = list(title = "Immi")) %>% 
+          layout(title = theTitle, geo = g ) 
+   
+ })
+
+ DT::renderDataTable({
+   
+   if (is.null(mapData())) return()
+ 
+   
+   df <-data()$df
+   sel_data <- data()$sel_data
+   
+   inCountry <-df$To[[mapData()+1]]
+   
+   countryName <- df$country.name[[mapData()+1]]
+   
+ 
+   
+   sel_data %>% 
+     arrange(desc(Count)) %>% 
+     filter(Gender=="TOT"&Year==input$mig_years&To==inCountry&From!="TOT") %>%
+     select(Country,Immigrants=Count,Population) %>% 
+     mutate(Imm_pc=round(Immigrants*100/sum(Immigrants,na.rm=T),1),Country_pc=round(Immigrants*100/Population,3)) %>% 
+     arrange(desc(Immigrants)) %>%
+     DT::datatable(class='compact stripe hover row-border order-column',rownames=FALSE,options= list(paging = TRUE, searching = FALSE,info=FALSE))  %>% 
+     formatCurrency(c('Immigrants','Population'), digits=0,currency="") 
+   
+ })
+
+
+```
+ 
+
+
+##  <span class="blogs">mytinyshiny blogs</span>
+
+
+- [English Premier League](https://mytinyshinys.shinyapps.io/premierBlog)
+- [Other Sports](https://mytinyshinys.shinyapps.io/sportsBlog)
+- [Socio-Economic](https://mytinyshinys.shinyapps.io/socioEconomicsBlog)
+- [Analytics](https://mytinyshinys.shinyapps.io/analyticsBlog)
+
+
+##  <span class="blogs">mytinyshiny web sites</span>
+
+
+- [OECD](https://mytinyshinys.shinyapps.io/OECD/)
+- [ACS](https://mytinyshinys.shinyapps.io/usacs)
+- [Mainly Maps](https://mytinyshinys.shinyapps.io/mainlyMaps/)
+- [Full Dashboard](https://mytinyshinys.shinyapps.io/dashboard)
