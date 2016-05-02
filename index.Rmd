@@ -178,12 +178,14 @@ always <-borrowings %>%
 topAuthors <- always$author
 
 
+
 ```
 
 Turns out there are only seven so  we can easily do an uncluttered plot
 
 ```{r 160309  chart,  echo=TRUE}
 # plot their popularity over the years
+
 borrowings %>% 
   filter(author %in% topAuthors) %>% 
   arrange(year) %>% 
@@ -416,7 +418,7 @@ mapData <- reactive({
 
 ##  <span class="blogs">mytinyshiny web sites</span>
 
-
+- [World Bank](https://mytinyshinys.shinyapps.io/worldBank/)
 - [OECD](https://mytinyshinys.shinyapps.io/OECD/)
 - [ACS](https://mytinyshinys.shinyapps.io/usacs)
 - [Mainly Maps](https://mytinyshinys.shinyapps.io/mainlyMaps/)
